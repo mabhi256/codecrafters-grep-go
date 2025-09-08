@@ -59,6 +59,7 @@ func main() {
 func matchLine(line []byte, pattern string) (bool, error) {
 	var ok bool
 
+	n := len(pattern)
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	// fmt.Fprintln(os.Stderr, "Logs from your program will appear here!")
 
@@ -68,6 +69,16 @@ func matchLine(line []byte, pattern string) (bool, error) {
 
 	case pattern == "\\w":
 		ok = hasAlphaNumeric(line)
+
+	case n >= 3 && pattern[0] == '[' && pattern[n-1] == ']' && pattern[1] != '^':
+		for _, char := range line {
+			for _, check := range pattern[1 : n-1] {
+				if char == byte(check) {
+					ok = true
+					break
+				}
+			}
+		}
 
 	case utf8.RuneCountInString(pattern) == 1:
 		ok = bytes.ContainsAny(line, pattern)
