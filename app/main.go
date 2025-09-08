@@ -5,11 +5,28 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"unicode/utf8"
 )
 
-// Ensures gofmt doesn't remove the "bytes" import above (feel free to remove this!)
-var _ = bytes.ContainsAny
+func isDigit(char byte) bool {
+	return char >= '0' && char <= '9'
+}
+
+func hasDigit(line []byte) bool {
+	return slices.ContainsFunc(line, isDigit)
+}
+
+func isAlphaNumeric(char byte) bool {
+	isSmall := char >= 'a' && char <= 'z'
+	isCapitalized := char >= 'A' && char <= 'Z'
+
+	return isSmall || isCapitalized || isDigit(char) || char == '_'
+}
+
+func hasAlphaNumeric(line []byte) bool {
+	return slices.ContainsFunc(line, isAlphaNumeric)
+}
 
 // Usage: echo <input_text> | your_program.sh -E <pattern>
 func main() {
@@ -47,12 +64,11 @@ func matchLine(line []byte, pattern string) (bool, error) {
 
 	switch {
 	case pattern == "\\d":
-		for _, char := range []byte(line) {
-			if char >= '0' && char <= '9' {
-				ok = true
-				break
-			}
-		}
+		ok = hasDigit(line)
+
+	case pattern == "\\w":
+		ok = hasAlphaNumeric(line)
+
 	case utf8.RuneCountInString(pattern) == 1:
 		ok = bytes.ContainsAny(line, pattern)
 
