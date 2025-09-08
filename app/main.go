@@ -40,16 +40,25 @@ func main() {
 }
 
 func matchLine(line []byte, pattern string) (bool, error) {
-	if utf8.RuneCountInString(pattern) != 1 {
-		return false, fmt.Errorf("unsupported pattern: %q", pattern)
-	}
-
 	var ok bool
 
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
-	fmt.Fprintln(os.Stderr, "Logs from your program will appear here!")
+	// fmt.Fprintln(os.Stderr, "Logs from your program will appear here!")
 
-	ok = bytes.ContainsAny(line, pattern)
+	switch {
+	case pattern == "\\d":
+		for _, char := range []byte(line) {
+			if char >= '0' && char <= '9' {
+				ok = true
+				break
+			}
+		}
+	case utf8.RuneCountInString(pattern) == 1:
+		ok = bytes.ContainsAny(line, pattern)
+
+	default:
+		return false, fmt.Errorf("unsupported pattern: %q", pattern)
+	}
 
 	return ok, nil
 }
