@@ -18,6 +18,11 @@ func tokenize(pattern string) []string {
 			tokens = append(tokens, token)
 			i = pos
 
+		case '^':
+			token, pos := readAnchor(pattern, i)
+			tokens = append(tokens, token)
+			i = pos
+
 		default:
 			tokens = append(tokens, string(pattern[i]))
 			i++
@@ -40,6 +45,14 @@ func readCharClass(pattern string, startPos int) (string, int) {
 }
 
 func readEscape(pattern string, startPos int) (string, int) {
+	if len(pattern) == startPos+1 {
+		return "", len(pattern)
+	}
+
+	return pattern[startPos : startPos+2], startPos + 2
+}
+
+func readAnchor(pattern string, startPos int) (string, int) {
 	if len(pattern) == startPos+1 {
 		return "", len(pattern)
 	}

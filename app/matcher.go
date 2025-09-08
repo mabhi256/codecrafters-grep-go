@@ -3,6 +3,10 @@ package main
 func matchTokensAt(tokens []string, input []byte, pos int) bool {
 	j := pos
 	for _, token := range tokens {
+		if j >= len(input) {
+			return false
+		}
+
 		var matched bool
 		switch token[0] {
 		case '\\':
@@ -10,6 +14,9 @@ func matchTokensAt(tokens []string, input []byte, pos int) bool {
 
 		case '[':
 			matched = matchCharClass(token, input, j)
+
+		case '^':
+			matched = matchAnchor(token, input, j)
 
 		default:
 			matched = matchLiteral(token, input, j)
@@ -25,10 +32,6 @@ func matchTokensAt(tokens []string, input []byte, pos int) bool {
 }
 
 func matchShorthand(token string, input []byte, pos int) bool {
-	if pos >= len(input) {
-		return false
-	}
-
 	switch token {
 	case "\\d":
 		return isDigit(input[pos])
@@ -45,10 +48,6 @@ func matchShorthand(token string, input []byte, pos int) bool {
 }
 
 func matchCharClass(token string, input []byte, pos int) bool {
-	if pos >= len(input) {
-		return false
-	}
-
 	isNegated := token[1] == '^'
 
 	chars := []byte(token[1 : len(token)-1])
@@ -71,11 +70,11 @@ func matchCharClass(token string, input []byte, pos int) bool {
 	return isNegated
 }
 
-func matchLiteral(token string, input []byte, pos int) bool {
-	if pos >= len(input) {
-		return false
-	}
+func matchAnchor(token string, input []byte, pos int) bool {
+	return pos == 0 && token[1] == input[pos]
+}
 
+func matchLiteral(token string, input []byte, pos int) bool {
 	return token == string(input[pos])
 }
 
