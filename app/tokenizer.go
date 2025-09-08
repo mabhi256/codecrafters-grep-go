@@ -19,9 +19,13 @@ func tokenize(pattern string) []string {
 			i = pos
 
 		case '^':
-			token, pos := readAnchor(pattern, i)
+			token, pos := readStartAnchor(pattern, i)
 			tokens = append(tokens, token)
 			i = pos
+
+		case '$':
+			tokens = append(tokens, "$")
+			i++
 
 		default:
 			tokens = append(tokens, string(pattern[i]))
@@ -32,9 +36,9 @@ func tokenize(pattern string) []string {
 	return tokens
 }
 
-func readCharClass(pattern string, startPos int) (string, int) {
+func readCharClass(pattern string, pos int) (string, int) {
 	charClass := ""
-	for i := startPos; i < len(pattern); i++ {
+	for i := pos; i < len(pattern); i++ {
 		charClass += string(pattern[i])
 		if pattern[i] == ']' {
 			return charClass, i + 1
@@ -44,18 +48,18 @@ func readCharClass(pattern string, startPos int) (string, int) {
 	return "", len(pattern)
 }
 
-func readEscape(pattern string, startPos int) (string, int) {
-	if len(pattern) == startPos+1 {
+func readEscape(pattern string, pos int) (string, int) {
+	if len(pattern) == pos+1 {
 		return "", len(pattern)
 	}
 
-	return pattern[startPos : startPos+2], startPos + 2
+	return pattern[pos : pos+2], pos + 2
 }
 
-func readAnchor(pattern string, startPos int) (string, int) {
-	if len(pattern) == startPos+1 {
+func readStartAnchor(pattern string, pos int) (string, int) {
+	if len(pattern) == pos+1 {
 		return "", len(pattern)
 	}
 
-	return pattern[startPos : startPos+2], startPos + 2
+	return pattern[pos : pos+2], pos + 2
 }
