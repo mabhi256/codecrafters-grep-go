@@ -70,13 +70,27 @@ func matchLine(line []byte, pattern string) (bool, error) {
 	case pattern == "\\w":
 		ok = hasAlphaNumeric(line)
 
-	case n >= 3 && pattern[0] == '[' && pattern[n-1] == ']' && pattern[1] != '^':
+	case n >= 3 && pattern[0] == '[' && pattern[1] != '^' && pattern[n-1] == ']':
 		for _, char := range line {
-			for _, check := range pattern[1 : n-1] {
-				if char == byte(check) {
-					ok = true
+			for _, check := range []byte(pattern[1 : n-1]) {
+				if char == check {
+					return true, nil
+				}
+			}
+		}
+
+	case n >= 4 && pattern[0] == '[' && pattern[1] == '^' && pattern[n-1] == ']':
+		for _, char := range line {
+			var found bool
+			for _, check := range []byte(pattern[2 : n-1]) {
+				if char == check {
+					found = true
 					break
 				}
+			}
+
+			if !found {
+				return true, nil
 			}
 		}
 
