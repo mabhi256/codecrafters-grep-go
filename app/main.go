@@ -65,6 +65,14 @@ func matchHere(input []byte, pattern string) bool {
 		return true // no pattern left to match
 	}
 
+	if len(pattern) >= 2 && pattern[1] == '*' {
+		return matchStar(input, pattern[0], pattern[2:])
+	}
+
+	if len(pattern) >= 2 && pattern[1] == '?' {
+		return matchQuestion(input, pattern[0], pattern[2:])
+	}
+
 	if len(input) == 0 {
 		// if input is empty and pattern is 'end anchor', then true
 		return pattern == "$"
@@ -100,14 +108,46 @@ func matchHere(input []byte, pattern string) bool {
 // Something like grep "a*a*a*a*a*a*a*b" huge_file.txt will blowup exponentially
 
 func matchPlus(input []byte, c byte, pattern string) bool {
+	// match the first character
 	if len(input) == 0 || input[0] != c {
 		return false
 	}
 
+	// match more than one characters
 	for i := 0; i < len(input) && input[i] == c; i++ {
 		if matchHere(input[i+1:], pattern) {
 			return true
 		}
+	}
+
+	return false
+}
+
+func matchStar(input []byte, c byte, pattern string) bool {
+	// match 0 times
+	if matchHere(input, pattern) {
+		return true
+	}
+
+	// If the first n characters match, then match the rest of the pattern
+	for i := 0; i < len(input) && input[i] == c; i++ {
+		if matchHere(input[i+1:], pattern) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func matchQuestion(input []byte, c byte, pattern string) bool {
+	// match 0 times
+	if matchHere(input, pattern) {
+		return true
+	}
+
+	// match the first char, then match the rest of the pattern
+	if input[0] == c && matchHere(input[1:], pattern) {
+		return true
 	}
 
 	return false
