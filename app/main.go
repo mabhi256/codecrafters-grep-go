@@ -61,40 +61,35 @@ func matchLine(line []byte, pattern string) (bool, error) {
 }
 
 func matchHere(input []byte, pattern string) bool {
-	if len(pattern) == 0 {
+	switch {
+	case len(pattern) == 0:
 		return true // no pattern left to match
-	}
 
-	if len(pattern) >= 2 && pattern[1] == '*' {
+	case len(pattern) >= 2 && pattern[1] == '*':
 		return matchStar(input, pattern[0], pattern[2:])
-	}
 
-	if len(pattern) >= 2 && pattern[1] == '?' {
+	case len(pattern) >= 2 && pattern[1] == '?':
 		return matchQuestion(input, pattern[0], pattern[2:])
-	}
 
-	if len(input) == 0 {
+	case len(input) == 0:
 		// if input is empty and pattern is 'end anchor', then true
 		return pattern == "$"
-	}
 
-	if len(pattern) >= 2 && pattern[1] == '+' {
+	case len(pattern) >= 2 && pattern[1] == '+':
 		return matchPlus(input, pattern[0], pattern[2:])
-	}
 
-	if input[0] == pattern[0] {
+	case pattern[0] == input[0] || pattern[0] == '.':
 		return matchHere(input[1:], pattern[1:])
-	}
 
-	if len(pattern) >= 2 && pattern[0] == '\\' {
+	case len(pattern) >= 2 && pattern[0] == '\\':
 		return matchShorthand(input, pattern)
-	}
 
-	if len(pattern) >= 2 && pattern[0] == '[' {
+	case len(pattern) >= 2 && pattern[0] == '[':
 		return matchCharacterClass(input, pattern)
-	}
 
-	return false
+	default:
+		return false
+	}
 }
 
 // Actual gnu grep uses
@@ -109,12 +104,12 @@ func matchHere(input []byte, pattern string) bool {
 
 func matchPlus(input []byte, c byte, pattern string) bool {
 	// match the first character
-	if len(input) == 0 || input[0] != c {
+	if len(input) == 0 || (input[0] != c && c != '.') {
 		return false
 	}
 
 	// match more than one characters
-	for i := 0; i < len(input) && input[i] == c; i++ {
+	for i := 0; i < len(input) && (input[i] == c || c == '.'); i++ {
 		if matchHere(input[i+1:], pattern) {
 			return true
 		}
@@ -130,7 +125,7 @@ func matchStar(input []byte, c byte, pattern string) bool {
 	}
 
 	// If the first n characters match, then match the rest of the pattern
-	for i := 0; i < len(input) && input[i] == c; i++ {
+	for i := 0; i < len(input) && (input[i] == c || c == '.'); i++ {
 		if matchHere(input[i+1:], pattern) {
 			return true
 		}
@@ -146,7 +141,7 @@ func matchQuestion(input []byte, c byte, pattern string) bool {
 	}
 
 	// match the first char, then match the rest of the pattern
-	if input[0] == c && matchHere(input[1:], pattern) {
+	if (input[0] == c || c == '.') && matchHere(input[1:], pattern) {
 		return true
 	}
 
