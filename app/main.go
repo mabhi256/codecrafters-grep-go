@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -45,23 +46,33 @@ func main() {
 			os.Exit(1)
 		}
 	} else {
-		file := os.Args[3]
+		fileName := os.Args[3]
 
-		line, err := os.ReadFile(file)
+		file, err := os.Open(fileName)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: read input file: %v\n", err)
 			os.Exit(2)
 		}
+		defer file.Close()
 
-		ok, err := matchLine(line, pattern)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(2)
+		scanner := bufio.NewScanner(file)
+		found := false
+		for scanner.Scan() {
+			line := scanner.Text()
+
+			ok, err := matchLine([]byte(line), pattern)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+				os.Exit(2)
+			}
+
+			if ok {
+				found = true
+				fmt.Println(string(line))
+			}
 		}
 
-		if ok {
-			fmt.Print(string(line))
-		} else {
+		if !found {
 			os.Exit(1)
 		}
 	}
