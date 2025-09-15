@@ -28,20 +28,42 @@ func main() {
 
 	pattern := os.Args[2]
 
-	line, err := io.ReadAll(os.Stdin) // assume we're only dealing with a single line
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: read input text: %v\n", err)
-		os.Exit(2)
-	}
+	if len(os.Args) == 3 {
+		line, err := io.ReadAll(os.Stdin) // assume we're only dealing with a single line
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: read input text: %v\n", err)
+			os.Exit(2)
+		}
 
-	ok, err := matchLine(line, pattern)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(2)
-	}
+		ok, err := matchLine(line, pattern)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(2)
+		}
 
-	if !ok {
-		os.Exit(1)
+		if !ok {
+			os.Exit(1)
+		}
+	} else {
+		file := os.Args[3]
+
+		line, err := os.ReadFile(file)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: read input file: %v\n", err)
+			os.Exit(2)
+		}
+
+		ok, err := matchLine(line, pattern)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(2)
+		}
+
+		if ok {
+			fmt.Print(string(line))
+		} else {
+			os.Exit(1)
+		}
 	}
 
 	// default exit code is 0 which means success
