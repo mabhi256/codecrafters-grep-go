@@ -46,29 +46,37 @@ func main() {
 			os.Exit(1)
 		}
 	} else {
-		fileName := os.Args[3]
-
-		file, err := os.Open(fileName)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: read input file: %v\n", err)
-			os.Exit(2)
-		}
-		defer file.Close()
-
-		scanner := bufio.NewScanner(file)
 		found := false
-		for scanner.Scan() {
-			line := scanner.Text()
 
-			ok, err := matchLine([]byte(line), pattern)
+		for i := 3; i < len(os.Args); i++ {
+			fileName := os.Args[i]
+
+			file, err := os.Open(fileName)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+				fmt.Fprintf(os.Stderr, "error: read input file: %v\n", err)
 				os.Exit(2)
 			}
+			defer file.Close()
 
-			if ok {
-				found = true
-				fmt.Println(string(line))
+			scanner := bufio.NewScanner(file)
+			for scanner.Scan() {
+				line := scanner.Text()
+
+				ok, err := matchLine([]byte(line), pattern)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "error: %v\n", err)
+					os.Exit(2)
+				}
+
+				if ok {
+					found = true
+
+					if len(os.Args) == 4 {
+						fmt.Printf("%s\n", line)
+					} else {
+						fmt.Printf("%s:%s\n", fileName, line)
+					}
+				}
 			}
 		}
 
