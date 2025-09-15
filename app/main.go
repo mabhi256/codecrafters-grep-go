@@ -22,70 +22,113 @@ func isAlphaNumeric(char byte) bool {
 
 // Usage: echo <input_text> | your_program.sh -E <pattern>
 func main() {
-	if len(os.Args) < 3 || os.Args[1] != "-E" {
+	if len(os.Args) < 3 || (os.Args[1] != "-E" && os.Args[1] != "-r") {
 		fmt.Fprintf(os.Stderr, "usage: mygrep -E <pattern>\n")
 		os.Exit(2) // 1 means no lines were selected, >1 means error
 	}
 
 	pattern := os.Args[2]
+	found := false
 
 	if len(os.Args) == 3 {
-		line, err := io.ReadAll(os.Stdin) // assume we're only dealing with a single line
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: read input text: %v\n", err)
-			os.Exit(2)
+		found = matchStdin(pattern)
+	} else if os.Args[1] == "-r" {
+		pattern := os.Args[3]
+		dir := os.Args[4]
+		found = matchDir(pattern, dir)
+	} else {
+		for i := 3; i < len(os.Args); i++ {
+			fileName := os.Args[i]
+
+			if matchFile(pattern, "", fileName) {
+				found = true
+			}
+		}
+	}
+
+	if !found {
+		os.Exit(1)
+	}
+	// default exit code is 0 which means success
+}
+
+func matchDir(pattern string, dir string) bool {
+	dirEntry, err := os.ReadDir(dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: read input dir: %v\n", err)
+		os.Exit(2)
+	}
+
+	found := false
+	for _, entry := range dirEntry {
+		foundHere := false
+		if entry.IsDir() {
+			foundHere = matchDir(pattern, dir+entry.Name()+"/")
+		} else {
+			foundHere = matchFile(pattern, dir, entry.Name())
 		}
 
-		ok, err := matchLine(line, pattern)
+		if foundHere {
+			found = true
+		}
+	}
+
+	return found
+}
+
+func matchFile(pattern, dir, fileName string) bool {
+	if dir != "" {
+		fileName = dir + fileName
+	}
+
+	file, err := os.Open(fileName)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: read input file: %v\n", err)
+		os.Exit(2)
+	}
+	defer file.Close()
+
+	found := false
+	scanner := bufio.NewScanner(file)
+
+	// scan line by line
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		ok, err := matchLine([]byte(line), pattern)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(2)
 		}
 
-		if !ok {
-			os.Exit(1)
-		}
-	} else {
-		found := false
+		if ok {
+			found = true
 
-		for i := 3; i < len(os.Args); i++ {
-			fileName := os.Args[i]
-
-			file, err := os.Open(fileName)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "error: read input file: %v\n", err)
-				os.Exit(2)
+			if dir != "" || len(os.Args) >= 5 {
+				fmt.Printf("%s:%s\n", fileName, line)
+			} else {
+				fmt.Printf("%s\n", line)
 			}
-			defer file.Close()
-
-			scanner := bufio.NewScanner(file)
-			for scanner.Scan() {
-				line := scanner.Text()
-
-				ok, err := matchLine([]byte(line), pattern)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "error: %v\n", err)
-					os.Exit(2)
-				}
-
-				if ok {
-					found = true
-
-					if len(os.Args) == 4 {
-						fmt.Printf("%s\n", line)
-					} else {
-						fmt.Printf("%s:%s\n", fileName, line)
-					}
-				}
-			}
-		}
-
-		if !found {
-			os.Exit(1)
 		}
 	}
 
-	// default exit code is 0 which means success
+	return found
+}
+
+func matchStdin(pattern string) bool {
+	line, err := io.ReadAll(os.Stdin) // assume we're only dealing with a single line
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: read input text: %v\n", err)
+		os.Exit(2)
+	}
+
+	ok, err := matchLine(line, pattern)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(2)
+	}
+
+	return ok
 }
 
 func matchLine(line []byte, pattern string) (bool, error) {
