@@ -124,8 +124,7 @@ func (n QuantifierNode) matchExactly(input []byte, pos int, captures []string, c
 		// For 0 matches, we need to handle capture groups that should be cleared
 		if captureNode, ok := n.Child.(CaptureNode); ok {
 			// For capture groups that match 0 times, set the capture to ""
-			newCaptures := make([]string, len(captures))
-			copy(newCaptures, captures)
+			newCaptures := slices.Clone(captures)
 			newCaptures[captureNode.GroupIdx] = ""
 			return []MatchResult{{EndPos: pos, Captures: newCaptures}}
 		}

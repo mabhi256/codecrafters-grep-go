@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/codecrafters-io/grep-starter-go/app/nfa"
 )
 
 func isDigit(char byte) bool {
@@ -60,7 +62,12 @@ func matchLine(line []byte, pattern string) (bool, error) {
 
 	// return matched, nil
 
-	matched, _, err := MatchASTHybrid(line, pattern)
+	// matched, _, err := MatchASTHybrid(line, pattern)
+	// if err != nil {
+	// 	return false, err
+	// }
+
+	matched, err := nfa.MatchNFA(line, pattern)
 	if err != nil {
 		return false, err
 	}
