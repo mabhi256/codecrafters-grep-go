@@ -237,7 +237,34 @@ func (p *NFAParser) isEOF() bool {
 	return p.pos >= len(p.pattern)
 }
 
+func (p *NFAParser) readNumber() int {
+	if p.pos >= len(p.pattern) {
+		return 0
+	}
+
+	i := p.pos
+	for !p.isEOF() && isDigit(p.peek()) {
+		p.advance()
+	}
+	j := p.pos
+
+	num, _ := strconv.Atoi(p.pattern[i:j])
+	return num
+}
+
 // ParseNFA parses the entire pattern and returns an NFA using Thompson construction
+// +---+----------------------------------------------------------+
+// |   |             ERE Precedence (from high to low)            |
+// +---+----------------------------------------------------------+
+// | 1 | Collation-related bracket symbols | [==] [::] [..]       |
+// | 2 | Escaped characters                | \<special character> |
+// | 3 | Bracket expression                | []                   |
+// | 4 | Grouping                          | ()                   |
+// | 5 | Single-character-ERE duplication  | * + ? {m,n}          |
+// | 6 | Concatenation                     |                      |
+// | 7 | Anchoring                         | ^ $                  |
+// | 8 | Alternation                       | |                    |
+// +---+-----------------------------------+----------------------+
 func (p *NFAParser) ParseNFA() (*NFA, error) {
 	if len(p.pattern) == 0 {
 		return nil, fmt.Errorf("empty pattern")
@@ -291,10 +318,11 @@ func (p *NFAParser) parseSequence() (*NFA, error) {
 }
 
 func isQuantifier(ch byte) bool {
-	return ch == '*' || ch == '+' || ch == '?'
+	return ch == '*' || ch == '+' || ch == '?' || ch == '{'
 }
 
 func (p *NFAParser) parseQuantifiedAtom() (*NFA, error) {
+	startPos := p.pos
 	// Parse base atom first
 	atom, err := p.parseAtom()
 	if err != nil {
@@ -325,9 +353,65 @@ func (p *NFAParser) parseQuantifiedAtom() (*NFA, error) {
 	case '?':
 		return p.buildOptional(atom), nil
 
+	case '{':
+		return p.parseQuantifierGroup(atom, startPos)
+
 	default:
 		return atom, nil
 	}
+}
+
+func (p *NFAParser) parseQuantifierGroup(atom *NFA, startPos int) (*NFA, error) {
+	var minCount = p.readNumber()
+	maxCount := minCount
+
+	if !p.isEOF() && p.peek() == ',' {
+		p.advance()
+		maxCount = -1 // unbounded
+		if !p.isEOF() && isDigit(p.peek()) {
+			maxCount = p.readNumber()
+		}
+	}
+
+	if p.peek() != '}' {
+		return nil, fmt.Errorf("expected '}', found: %c", p.peek())
+	}
+	if p.isEOF() {
+		return nil, fmt.Errorf("unexpected EOF")
+	}
+	p.advance() // consume '}'
+
+	// Repeatedly parsing the same atom doesn't make sense.
+	// It is better to tag these loops and keep their count in execution context
+
+	var nfa *NFA
+	endPos := p.pos
+	for range minCount {
+		p.pos = startPos
+		if nfa == nil {
+			nfa = atom
+		} else {
+			nextAtom, _ := p.parseAtom()
+			nfa = nfa.Concatenate(nextAtom)
+		}
+	}
+
+	if maxCount == -1 {
+		p.pos = startPos
+		nextAtom, _ := p.parseAtom()
+		kleenStar := p.buildKleeneStar(nextAtom)
+		nfa = nfa.Concatenate(kleenStar)
+	} else {
+		for range maxCount - minCount {
+			p.pos = startPos
+			nextAtom, _ := p.parseAtom()
+			optional := p.buildOptional(nextAtom)
+			nfa = nfa.Concatenate(optional)
+		}
+	}
+
+	p.pos = endPos
+	return nfa, nil
 }
 
 //  q₀, q₁, q₂, q₃, q₄
@@ -335,9 +419,9 @@ func (p *NFAParser) parseQuantifiedAtom() (*NFA, error) {
 // Alternate combines two NFAs using Thompson construction for alternation
 // Thompson rule: N1 | N2 =
 //
-//	┌──ε──▶ ( N1 ) ─ε──▶┐
-//	q₀              	   q₁
-//	└──ε──▶ ( N2 ) ─ε──▶┘
+//		┌──ε──▶ ( N1 ) ─ε──▶┐
+//	    q₀              	q₁
+//		└──ε──▶ ( N2 ) ─ε──▶┘
 func (nfa1 *NFA) Alternate(nfa2 *NFA) *NFA {
 	q0 := NewState() // Start state q0
 	q1 := NewState() // Accept state q1
