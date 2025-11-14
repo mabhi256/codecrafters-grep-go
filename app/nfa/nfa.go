@@ -13,7 +13,7 @@ func isDigit(char byte) bool {
 
 // Matcher defines the interface for matching input symbols
 type Matcher interface {
-	Match(input []byte, pos int) bool
+	Match(input []byte, ex *ExecutionContext) bool
 	IsEpsilon() bool
 }
 
@@ -22,12 +22,12 @@ type LiteralMatcher struct {
 	Symbol byte
 }
 
-func (m LiteralMatcher) Match(input []byte, pos int) bool {
-	if pos >= len(input) {
+func (m LiteralMatcher) Match(input []byte, ex *ExecutionContext) bool {
+	if ex.Pos >= len(input) {
 		return false
 	}
 
-	return m.Symbol == input[pos]
+	return m.Symbol == input[ex.Pos]
 }
 
 func (m LiteralMatcher) IsEpsilon() bool {
@@ -37,7 +37,7 @@ func (m LiteralMatcher) IsEpsilon() bool {
 // EpsilonMatcher represents ε-transitions (empty transitions)
 type EpsilonMatcher struct{}
 
-func (m EpsilonMatcher) Match(input []byte, pos int) bool {
+func (m EpsilonMatcher) Match(input []byte, ex *ExecutionContext) bool {
 	return true // ε-transitions always match without consuming input
 }
 
@@ -49,7 +49,7 @@ type CaptureEpsilonMatcher struct {
 	CaptureTags []CaptureTag
 }
 
-func (m CaptureEpsilonMatcher) Match(input []byte, pos int) bool {
+func (m CaptureEpsilonMatcher) Match(input []byte, ex *ExecutionContext) bool {
 	return true // Always matches (epsilon)
 }
 
@@ -63,12 +63,12 @@ type CharClassMatcher struct {
 	Negated bool
 }
 
-func (m CharClassMatcher) Match(input []byte, pos int) bool {
-	if pos >= len(input) {
+func (m CharClassMatcher) Match(input []byte, ex *ExecutionContext) bool {
+	if ex.Pos >= len(input) {
 		return false
 	}
 
-	found := slices.Contains(m.Chars, input[pos])
+	found := slices.Contains(m.Chars, input[ex.Pos])
 
 	if found != m.Negated { // XOR logic
 		return true
@@ -82,12 +82,12 @@ func (m CharClassMatcher) IsEpsilon() bool {
 
 type DotMatcher struct{}
 
-func (m DotMatcher) Match(input []byte, pos int) bool {
-	if pos >= len(input) {
+func (m DotMatcher) Match(input []byte, ex *ExecutionContext) bool {
+	if ex.Pos >= len(input) {
 		return false
 	}
 
-	return input[pos] != '\n'
+	return input[ex.Pos] != '\n'
 }
 
 func (m DotMatcher) IsEpsilon() bool {
@@ -98,7 +98,7 @@ type BackRefMatcher struct {
 	GroupID int
 }
 
-func (m BackRefMatcher) Match(input []byte, pos int) bool {
+func (m BackRefMatcher) Match(input []byte, ex *ExecutionContext) bool {
 	// Cannot access capture data during this stage, because we need to actually run the nfa to get this info
 	// Just return true as a placeholder, actual matching will be done in deltaFunction
 	return true
@@ -106,6 +106,34 @@ func (m BackRefMatcher) Match(input []byte, pos int) bool {
 
 func (m BackRefMatcher) IsEpsilon() bool {
 	return false
+}
+
+var LoopID = -1
+
+// It is essentially a stateful epsilon matcher
+type RangeQuantifierMatcher struct {
+	// If min = max, exact match
+	// If max = -1, atleast min
+	// else [min, max]
+	Min    int
+	Max    int
+	LoopID int // Unique ID to identify this quantifier
+}
+
+func (m RangeQuantifierMatcher) Match(input []byte, ex *ExecutionContext) bool {
+	curr := ex.RangeQuantifierCounter[m.LoopID]
+
+	if m.Max == -1 {
+		// Only min check (for exit transition)
+		return curr >= m.Min
+	}
+
+	// Range check (for loop-back transition)
+	return curr >= m.Min && curr <= m.Max
+}
+
+func (m RangeQuantifierMatcher) IsEpsilon() bool {
+	return true
 }
 
 // CaptureTag represents entering or exiting a capture group
@@ -169,23 +197,26 @@ type ActiveCapture struct {
 
 // RuntimeState represents the current execution state during NFA simulation
 type ExecutionContext struct {
-	State           *State
-	Pos             int // Current position in input
-	ActiveCaptures  []ActiveCapture
-	CompletedGroups map[int]CaptureGroup
+	State                  *State
+	Pos                    int // Current position in input
+	ActiveCaptures         []ActiveCapture
+	CompletedGroups        map[int]CaptureGroup
+	RangeQuantifierCounter map[int]int
 }
 
 // Clone creates a deep copy of the execution context
 func (ex *ExecutionContext) Clone() *ExecutionContext {
 	clone := &ExecutionContext{
-		State:           ex.State,
-		Pos:             ex.Pos,
-		ActiveCaptures:  make([]ActiveCapture, len(ex.ActiveCaptures)),
-		CompletedGroups: make(map[int]CaptureGroup),
+		State:                  ex.State,
+		Pos:                    ex.Pos,
+		ActiveCaptures:         make([]ActiveCapture, len(ex.ActiveCaptures)),
+		CompletedGroups:        make(map[int]CaptureGroup),
+		RangeQuantifierCounter: make(map[int]int),
 	}
 
 	copy(clone.ActiveCaptures, ex.ActiveCaptures)
 	maps.Copy(clone.CompletedGroups, ex.CompletedGroups)
+	maps.Copy(clone.RangeQuantifierCounter, ex.RangeQuantifierCounter)
 
 	return clone
 }
@@ -322,7 +353,7 @@ func isQuantifier(ch byte) bool {
 }
 
 func (p *NFAParser) parseQuantifiedAtom() (*NFA, error) {
-	startPos := p.pos
+	// startPos := p.pos
 	// Parse base atom first
 	atom, err := p.parseAtom()
 	if err != nil {
@@ -345,23 +376,26 @@ func (p *NFAParser) parseQuantifiedAtom() (*NFA, error) {
 
 	switch ch {
 	case '*':
-		return p.buildKleeneStar(atom), nil
+		return p.buildRangeQuantifier(atom, 0, -1), nil
+		// return p.buildKleeneStar(atom), nil
 
 	case '+':
-		return p.buildKleenePlus(atom), nil
+		return p.buildRangeQuantifier(atom, 1, -1), nil
+		// return p.buildKleenePlus(atom), nil
 
 	case '?':
-		return p.buildOptional(atom), nil
+		return p.buildRangeQuantifier(atom, 0, 1), nil
+		// return p.buildOptional(atom), nil
 
 	case '{':
-		return p.parseQuantifierGroup(atom, startPos)
+		return p.parseQuantifierGroup(atom /* , startPos */)
 
 	default:
 		return atom, nil
 	}
 }
 
-func (p *NFAParser) parseQuantifierGroup(atom *NFA, startPos int) (*NFA, error) {
+func (p *NFAParser) parseQuantifierGroup(atom *NFA /* , startPos int */) (*NFA, error) {
 	var minCount = p.readNumber()
 	maxCount := minCount
 
@@ -370,6 +404,10 @@ func (p *NFAParser) parseQuantifierGroup(atom *NFA, startPos int) (*NFA, error) 
 		maxCount = -1 // unbounded
 		if !p.isEOF() && isDigit(p.peek()) {
 			maxCount = p.readNumber()
+
+			if maxCount < minCount {
+				return nil, fmt.Errorf("invalid range quantifier {%d,%d}, n must be >= m", minCount, maxCount)
+			}
 		}
 	}
 
@@ -381,37 +419,7 @@ func (p *NFAParser) parseQuantifierGroup(atom *NFA, startPos int) (*NFA, error) 
 	}
 	p.advance() // consume '}'
 
-	// Repeatedly parsing the same atom doesn't make sense.
-	// It is better to tag these loops and keep their count in execution context
-
-	var nfa *NFA
-	endPos := p.pos
-	for range minCount {
-		p.pos = startPos
-		if nfa == nil {
-			nfa = atom
-		} else {
-			nextAtom, _ := p.parseAtom()
-			nfa = nfa.Concatenate(nextAtom)
-		}
-	}
-
-	if maxCount == -1 {
-		p.pos = startPos
-		nextAtom, _ := p.parseAtom()
-		kleenStar := p.buildKleeneStar(nextAtom)
-		nfa = nfa.Concatenate(kleenStar)
-	} else {
-		for range maxCount - minCount {
-			p.pos = startPos
-			nextAtom, _ := p.parseAtom()
-			optional := p.buildOptional(nextAtom)
-			nfa = nfa.Concatenate(optional)
-		}
-	}
-
-	p.pos = endPos
-	return nfa, nil
+	return p.buildRangeQuantifier(atom /* , startPos */, minCount, maxCount), nil
 }
 
 //  q₀, q₁, q₂, q₃, q₄
@@ -548,6 +556,76 @@ func (p *NFAParser) buildOptional(atom *NFA) *NFA {
 
 	// q2 --ε--> q3 (exit after matching some 'a's)
 	atom.Accept.AddTransition(q3, EpsilonMatcher{})
+
+	atom.Accept.IsAccept = false
+	return &NFA{Start: q0, Accept: q3}
+}
+
+//					  ┌───ε{m,n}──┐
+//					  ▼			  │
+// Pattern: q₀ --ε--> q₁--(atom)->q₂ --ε{m,n}-> q₃
+
+func (p *NFAParser) buildRangeQuantifier(atom *NFA /* , startPos int */, minCount int, maxCount int) *NFA {
+	// Repeatedly parsing the same atom doesn't make sense.
+	// It is better to tag these loops and keep their count in execution context
+
+	// var nfa *NFA
+	// endPos := p.pos
+	// for range minCount {
+	// 	p.pos = startPos
+	// 	if nfa == nil {
+	// 		nfa = atom
+	// 	} else {
+	// 		nextAtom, _ := p.parseAtom()
+	// 		nfa = nfa.Concatenate(nextAtom)
+	// 	}
+	// }
+
+	// if maxCount == -1 {
+	// 	p.pos = startPos
+	// 	nextAtom, _ := p.parseAtom()
+	// 	kleenStar := p.buildKleeneStar(nextAtom)
+	// 	nfa = nfa.Concatenate(kleenStar)
+	// } else {
+	// 	for range maxCount - minCount {
+	// 		p.pos = startPos
+	// 		nextAtom, _ := p.parseAtom()
+	// 		optional := p.buildOptional(nextAtom)
+	// 		nfa = nfa.Concatenate(optional)
+	// 	}
+	// }
+
+	// p.pos = endPos
+
+	q0 := NewState() // Start state q0
+	q3 := NewState() // Accept state q3
+	q3.IsAccept = true
+
+	// q0 --ε--> q1 (enter the 'a' pattern)
+	q0.AddTransition(atom.Start, EpsilonMatcher{})
+
+	if minCount == 0 {
+		q0.AddTransition(q3, EpsilonMatcher{})
+	}
+
+	// Don't need counters when max = 1
+	if maxCount == 1 {
+		atom.Accept.AddTransition(q3, EpsilonMatcher{})
+		atom.Accept.IsAccept = false
+		return &NFA{Start: q0, Accept: q3}
+	}
+
+	// {m,n} uses two transitions sharing the same counter:
+	// 1. Loop-back: Match another atom while count < max
+	// 2. Exit: Finish when count >= min
+	// {m,n} = {0,n-1} -> {m, -1}
+	LoopID++
+	loopCount := max(-1, maxCount-1)
+	// Loop-back: q2 --ε{0,n-1}-> q1 (loop back to match < max 'a')
+	atom.Accept.AddTransition(atom.Start, RangeQuantifierMatcher{0, loopCount, LoopID})
+
+	// Exit: q2 --ε{m,-1}-> q3 (can exit if match >= min 'a')
+	atom.Accept.AddTransition(q3, RangeQuantifierMatcher{minCount, -1, LoopID})
 
 	atom.Accept.IsAccept = false
 	return &NFA{Start: q0, Accept: q3}
@@ -795,7 +873,7 @@ func deltaFunction(contexts []*ExecutionContext, input []byte) []*ExecutionConte
 
 			// Check non-epsilon transitions only
 			if !transition.Matcher.IsEpsilon() &&
-				transition.Matcher.Match(input, ctx.Pos) {
+				transition.Matcher.Match(input, ctx) {
 
 				newCtx := ctx.Clone()
 				newCtx.State = transition.Target
@@ -835,6 +913,22 @@ func epsilonClosure(contexts []*ExecutionContext, input []byte) []*ExecutionCont
 
 		// Follow all ε-transitions
 		for _, transition := range current.State.Transitions {
+			// Handle RangeQuantifierMatcher
+			if matcher, ok := transition.Matcher.(RangeQuantifierMatcher); ok {
+				oldCount := current.RangeQuantifierCounter[matcher.LoopID]
+				newCount := oldCount + 1
+
+				newCtx := current.Clone()
+				newCtx.RangeQuantifierCounter[matcher.LoopID] = newCount
+
+				// Check if transition is allowed
+				if matcher.Match(input, newCtx) && !visited[transition.Target] {
+					newCtx.State = transition.Target
+					stack = append(stack, newCtx)
+				}
+				continue
+			}
+
 			if transition.Matcher.IsEpsilon() && !visited[transition.Target] {
 				newCtx := current.Clone()
 				newCtx.State = transition.Target
@@ -846,6 +940,7 @@ func epsilonClosure(contexts []*ExecutionContext, input []byte) []*ExecutionCont
 
 				stack = append(stack, newCtx)
 			}
+
 		}
 	}
 
@@ -888,10 +983,11 @@ func (ex *ExecutionContext) ApplyTags(tags []CaptureTag, input []byte) {
 func (nfa *NFA) Run(input []byte, pos int, hasEndAnchor bool) *MatchResult {
 	currContexts := []*ExecutionContext{
 		{
-			State:           nfa.Start,
-			Pos:             pos,
-			ActiveCaptures:  make([]ActiveCapture, 0),
-			CompletedGroups: make(map[int]CaptureGroup),
+			State:                  nfa.Start,
+			Pos:                    pos,
+			ActiveCaptures:         make([]ActiveCapture, 0),
+			CompletedGroups:        make(map[int]CaptureGroup),
+			RangeQuantifierCounter: make(map[int]int),
 		},
 	}
 
